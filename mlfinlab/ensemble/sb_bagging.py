@@ -14,7 +14,7 @@ from sklearn.ensemble._bagging import BaseBagging
 from sklearn.ensemble._base import _partition_estimators
 from sklearn.base import ClassifierMixin, RegressorMixin
 from sklearn.utils.random import sample_without_replacement
-from sklearn.utils import indices_to_mask
+from sklearn.utils._mask import indices_to_mask
 from sklearn.metrics import accuracy_score, r2_score
 from sklearn.utils.validation import has_fit_parameter
 from sklearn.utils import check_random_state, check_array, check_consistent_length, check_X_y
