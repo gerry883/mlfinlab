@@ -8,30 +8,35 @@ Available Built-in Features for Selection (pass these strings in `selected_featu
 - "avg_tick_size"    : Average trade size within the bar.
 - "tick_rule_sum"    : Sum of signed ticks based on price movements.
 - "vwap"             : Volume Weighted Average Price.
-- "kyle_lambda"       : Kyle's Lambda - measures price impact of trades.
-- "amihud_lambda"     : Amihud's Lambda - illiquidity measure using log returns and volume.
-- "hasbrouck_lambda"  : Hasbrouck's Lambda - liquidity measure using signed ticks and log returns.
-- "entropy"           : Entropy metrics (Shannon, Plug-in, Lempel-Ziv, Konto) for encoded tick rule.
-                       If `volume_encoding` or `pct_encoding` are provided, volume and pct entropies 
-                       will also be computed.
+- "kyle_lambda"      : Kyle's Lambda - measures price impact of trades.
+- "amihud_lambda"    : Amihud's Lambda - illiquidity measure using log returns and volume.
+- "hasbrouck_lambda" : Hasbrouck's Lambda - liquidity measure using signed ticks and log returns.
+
+Entropy features can be selected individually. If not specified (and selected_features=None),
+all of them are computed by default:
+
+Tick-rule Entropies:
+- "tick_rule_shannon_entropy"
+- "tick_rule_plug_in_entropy"
+- "tick_rule_lempel_ziv_entropy"
+- "tick_rule_konto_entropy"
+
+Volume Entropies (if volume_encoding is provided):
+- "volume_shannon_entropy"
+- "volume_plug_in_entropy"
+- "volume_lempel_ziv_entropy"
+- "volume_konto_entropy"
+
+Pct Entropies (if pct_encoding is provided):
+- "pct_shannon_entropy"
+- "pct_plug_in_entropy"
+- "pct_lempel_ziv_entropy"
+- "pct_konto_entropy"
 
 Custom (Additional) Features:
 -----------------------------
 Users can provide a list of custom feature objects to `additional_features`, each having a `compute()` method
-that takes a DataFrame of tick data for the current bar and returns a computed value.
-
-Example Usage:
---------------
-custom_features = [MyCustomFeatureClass(), AnotherCustomFeatureClass()]
-generator = MicrostructuralFeaturesGenerator(
-    trades_input="tick_data.csv",
-    tick_num_series=pd.Series([100, 200, 300]),
-    selected_features=["vwap", "amihud_lambda", "entropy"],
-    additional_features=custom_features
-)
-
-features_df = generator.get_features(verbose=True)
-print(features_df)
+that takes a DataFrame of the current bar's ticks and returns a computed value.
 """
 
 import pandas as pd
@@ -46,41 +51,25 @@ from mlfinlab.microstructural_features.encoding import encode_tick_rule_array
 from mlfinlab.util.misc import crop_data_frame_in_batches
 
 
-# pylint: disable=too-many-instance-attributes
-
 class MicrostructuralFeaturesGeneratorEnhanced:
     """
-    Class which is used to generate inter-bar features when bars are already compressed.
+    Class used to generate inter-bar features after bars are formed. Supports selecting built-in features and
+    custom user-defined features, as well as separate selection of each entropy type.
 
-    Available Built-in Features for Selection:
-    -----------------------------------------
-    - "avg_tick_size"    : Average trade size within the bar.
-    - "tick_rule_sum"    : Sum of signed ticks based on price movements.
-    - "vwap"             : Volume Weighted Average Price.
-    - "kyle_lambda"      : Kyle's Lambda - measures price impact of trades.
-    - "amihud_lambda"    : Amihud's Lambda - illiquidity measure using log returns and volume.
-    - "hasbrouck_lambda" : Hasbrouck's Lambda - liquidity measure using signed ticks and log returns.
-    - "entropy"          : Entropy metrics (Shannon, Plug-in, Lempel-Ziv, Konto) for encoded tick rule.
-                           If `volume_encoding` or `pct_encoding` are provided, volume and pct entropies
-                           will also be computed.
-
-    Custom Features:
-    ----------------
-    Additional custom features can be computed by passing a list of feature objects to `additional_features`.
-    Each feature object should implement a `compute()` method that takes the current bar's tick data as a DataFrame
-    and returns the computed value.
-
-    :param trades_input: (str or pd.DataFrame) Path to the csv file or Pandas DataFrame containing raw tick data
-                         in the format [date_time, price, volume].
+    :param trades_input: (str or pd.DataFrame) Path to the csv file or DataFrame containing [date_time, price, volume].
     :param tick_num_series: (pd.Series) Series of tick numbers where bars were formed.
     :param batch_size: (int) Number of rows to read in from the csv, per batch.
-    :param volume_encoding: (dict) Dictionary of encoding scheme for trades size used for entropy calculations.
-    :param pct_encoding: (dict) Dictionary of encoding scheme for log returns used for entropy calculations.
-    :param selected_features: (list) List of built-in features to compute. 
-                              If None, all features are computed.
-                              Example: ["vwap", "entropy", "kyle_lambda"]
+    :param volume_encoding: (dict) Encoding scheme for trade sizes (for volume-based entropy).
+    :param pct_encoding: (dict) Encoding scheme for log returns (for pct-based entropy).
+    :param selected_features: (list) List of built-in features to compute. If None, all are computed.
+                              For entropies, specify individually:
+                              - tick_rule_shannon_entropy, tick_rule_plug_in_entropy,
+                                tick_rule_lempel_ziv_entropy, tick_rule_konto_entropy
+                              - volume_shannon_entropy, volume_plug_in_entropy,
+                                volume_lempel_ziv_entropy, volume_konto_entropy (if volume_encoding is given)
+                              - pct_shannon_entropy, pct_plug_in_entropy,
+                                pct_lempel_ziv_entropy, pct_konto_entropy (if pct_encoding is given)
     :param additional_features: (list) List of custom feature objects with a `compute()` method.
-                                Example: [MyCustomFeature()]
     """
 
     def __init__(self, trades_input: (str, pd.DataFrame), tick_num_series: pd.Series, batch_size: int = 2e7,
@@ -108,87 +97,85 @@ class MicrostructuralFeaturesGeneratorEnhanced:
         self.dollar_size = []
         self.log_ret = []
 
-        # Entropy properties
+        # Encodings
         self.volume_encoding = volume_encoding
         self.pct_encoding = pct_encoding
-        self.entropy_types = ['shannon', 'plug_in', 'lempel_ziv', 'konto']
 
         # Batch_run properties
         self.prev_price = None
         self.prev_tick_rule = 0
         self.tick_num = 0
 
-        # Feature selection and additional features
+        # Selected features and additional features
         self.selected_features = selected_features
         self.additional_features = additional_features
         self.computed_additional_features = []
 
     def get_features(self, verbose=True, to_csv=False, output_path=None):
         """
-        Reads a csv file of ticks or DataFrame in batches and then constructs corresponding microstructural features:
-        Including average tick size, tick rule sum, VWAP, Kyle lambda, Amihud lambda, Hasbrouck lambda, and entropies 
-        (if encodings are provided).
+        Reads a CSV file or DataFrame in batches and constructs corresponding microstructural features.
+        
+        If selected_features is None, all features (including all entropy measures) are computed.
 
-        Available Built-in Features for Selection:
-        -----------------------------------------
-        - "avg_tick_size"
-        - "tick_rule_sum"
-        - "vwap"
-        - "kyle_lambda"
-        - "amihud_lambda"
-        - "hasbrouck_lambda"
-        - "entropy"
-
-        :param verbose: (bool) Flag whether to print message on each processed batch or not
-        :param to_csv: (bool) Flag for writing the results of bars generation to local csv file, or to in-memory DataFrame
-        :param output_path: (str) Path to results file, if to_csv = True
-        :return: (DataFrame or None) Microstructural features for bar index
+        :param verbose: (bool) Whether to print progress during batch processing.
+        :param to_csv: (bool) If True, write results to CSV; if False, return a DataFrame.
+        :param output_path: (str) Path to the output CSV file if to_csv=True.
+        :return: (pd.DataFrame or None) DataFrame of computed features or None if written to CSV.
         """
 
         if to_csv is True:
-            header = True  # if to_csv is True, header should be written on the first batch only
-            open(output_path, 'w').close()  # Clean output csv file
+            header = True
+            open(output_path, 'w').close()  # Clean output file
 
-        # Prepare column headers based on selected features
+        # Determine columns dynamically
         cols = ['date_time']
-
-        # Conditionally add columns based on selected features
-        # If selected_features is None, all features are computed
-        if self.selected_features is None or 'avg_tick_size' in self.selected_features:
+        # Basic features
+        if self._is_selected('avg_tick_size'):
             cols.append('avg_tick_size')
-
-        if self.selected_features is None or 'tick_rule_sum' in self.selected_features:
+        if self._is_selected('tick_rule_sum'):
             cols.append('tick_rule_sum')
-
-        if self.selected_features is None or 'vwap' in self.selected_features:
+        if self._is_selected('vwap'):
             cols.append('vwap')
-
-        if self.selected_features is None or 'kyle_lambda' in self.selected_features:
+        if self._is_selected('kyle_lambda'):
             cols += ['kyle_lambda', 'kyle_lambda_t_value']
-
-        if self.selected_features is None or 'amihud_lambda' in self.selected_features:
+        if self._is_selected('amihud_lambda'):
             cols += ['amihud_lambda', 'amihud_lambda_t_value']
-
-        if self.selected_features is None or 'hasbrouck_lambda' in self.selected_features:
+        if self._is_selected('hasbrouck_lambda'):
             cols += ['hasbrouck_lambda', 'hasbrouck_lambda_t_value']
 
-        if self.selected_features is None or 'entropy' in self.selected_features:
-            # Tick rule entropy
-            for en_type in self.entropy_types:
-                cols.append('tick_rule_entropy_' + en_type)
+        # Entropy columns (tick_rule)
+        if self._entropy_selected('tick_rule_shannon_entropy'):
+            cols.append('tick_rule_shannon_entropy')
+        if self._entropy_selected('tick_rule_plug_in_entropy'):
+            cols.append('tick_rule_plug_in_entropy')
+        if self._entropy_selected('tick_rule_lempel_ziv_entropy'):
+            cols.append('tick_rule_lempel_ziv_entropy')
+        if self._entropy_selected('tick_rule_konto_entropy'):
+            cols.append('tick_rule_konto_entropy')
 
-            # Volume entropy
-            if self.volume_encoding is not None:
-                for en_type in self.entropy_types:
-                    cols.append('volume_entropy_' + en_type)
+        # Volume entropy columns
+        if self.volume_encoding is not None:
+            if self._entropy_selected('volume_shannon_entropy'):
+                cols.append('volume_shannon_entropy')
+            if self._entropy_selected('volume_plug_in_entropy'):
+                cols.append('volume_plug_in_entropy')
+            if self._entropy_selected('volume_lempel_ziv_entropy'):
+                cols.append('volume_lempel_ziv_entropy')
+            if self._entropy_selected('volume_konto_entropy'):
+                cols.append('volume_konto_entropy')
 
-            # Pct entropy
-            if self.pct_encoding is not None:
-                for en_type in self.entropy_types:
-                    cols.append('pct_entropy_' + en_type)
+        # Pct entropy columns
+        if self.pct_encoding is not None:
+            if self._entropy_selected('pct_shannon_entropy'):
+                cols.append('pct_shannon_entropy')
+            if self._entropy_selected('pct_plug_in_entropy'):
+                cols.append('pct_plug_in_entropy')
+            if self._entropy_selected('pct_lempel_ziv_entropy'):
+                cols.append('pct_lempel_ziv_entropy')
+            if self._entropy_selected('pct_konto_entropy'):
+                cols.append('pct_konto_entropy')
 
-        # Additional features - column names depend on user-defined features
-        # Assuming user-defined features return a single value each
+        # Additional features
         if self.additional_features:
             for i, _ in enumerate(self.additional_features, start=1):
                 cols.append(f'additional_feature_{i}')
@@ -196,37 +183,39 @@ class MicrostructuralFeaturesGeneratorEnhanced:
         final_bars = []
         count = 0
 
-        # Read csv in batches
+        # Process in batches
         for batch in self.generator_object:
-            if verbose:  # pragma: no cover
+            if verbose:
                 print('Batch number:', count)
 
             list_bars, stop_flag = self._extract_bars(data=batch)
 
-            if to_csv is True:
+            if to_csv:
                 pd.DataFrame(list_bars, columns=cols).to_csv(output_path, header=header, index=False, mode='a')
                 header = False
             else:
-                # Append to bars list
                 final_bars += list_bars
-            count += 1
 
-            # End of bar index, no need to calculate further
-            if stop_flag is True:
+            count += 1
+            if stop_flag:
                 break
 
-        # Return a DataFrame if not writing to CSV
         if final_bars:
-            bars_df = pd.DataFrame(final_bars, columns=cols)
-            return bars_df
-
+            return pd.DataFrame(final_bars, columns=cols)
         return None
 
+    def _is_selected(self, feature_name):
+        # If selected_features is None, all features are selected
+        return self.selected_features is None or feature_name in self.selected_features
+
+    def _entropy_selected(self, feature_name):
+        # If selected_features is None, we consider all entropies selected
+        if self.selected_features is None:
+            # Means all features including entropies are selected by default
+            return True
+        return feature_name in self.selected_features
+
     def _reset_cache(self):
-        """
-        Reset price_diff, trade_size, tick_rule, log_ret arrays to empty when bar is formed and features are
-        calculated
-        """
         self.price_diff = []
         self.trade_size = []
         self.tick_rule = []
@@ -235,17 +224,8 @@ class MicrostructuralFeaturesGeneratorEnhanced:
         self._reset_computed_additional_features()
 
     def _extract_bars(self, data):
-        """
-        Iterates over the provided data (ticks) and checks if a bar is formed. 
-        If a bar is formed, compute features and reset caches.
-
-        :param data: (pd.DataFrame) Containing columns [date_time, price, volume]
-        """
-
         list_bars = []
-
         for row in data.values:
-            # Set variables
             date_time = row[0]
             price = float(row[1])
             volume = row[2]
@@ -266,69 +246,69 @@ class MicrostructuralFeaturesGeneratorEnhanced:
 
             self.prev_price = price
 
-            # If reached the current bar tick_num
             if self.tick_num >= self.current_bar_tick_num:
                 self._get_bar_features(date_time, list_bars)
-
-                # Take the next tick number
                 try:
                     self.current_bar_tick_num = self.tick_num_generator.__next__()
                 except StopIteration:
-                    return list_bars, True  # Looped through all bar index
-                # Reset cache
+                    return list_bars, True
                 self._reset_cache()
         return list_bars, False
 
-    def _get_bar_features(self, date_time: pd.Timestamp, list_bars: list):
-        """
-        Calculate selected inter-bar features (and additional user-defined features) for the completed bar.
-
-        :param date_time: (pd.Timestamp) When bar was formed.
-        :param list_bars: (list) Previously formed bars (results will be appended here).
-        """
+    def _get_bar_features(self, date_time, list_bars):
         features = [date_time]
 
-        # Compute selected built-in features
-        # If no selection, compute all by default
-        if self.selected_features is None or 'avg_tick_size' in self.selected_features:
+        # Basic Features
+        if self._is_selected('avg_tick_size'):
             features.append(get_avg_tick_size(self.trade_size))
-
-        if self.selected_features is None or 'tick_rule_sum' in self.selected_features:
+        if self._is_selected('tick_rule_sum'):
             features.append(sum(self.tick_rule))
-
-        if self.selected_features is None or 'vwap' in self.selected_features:
+        if self._is_selected('vwap'):
             features.append(vwap(self.dollar_size, self.trade_size))
 
-        if self.selected_features is None or 'kyle_lambda' in self.selected_features:
+        if self._is_selected('kyle_lambda'):
             features.extend(get_trades_based_kyle_lambda(self.price_diff, self.trade_size, self.tick_rule))
-
-        if self.selected_features is None or 'amihud_lambda' in self.selected_features:
+        if self._is_selected('amihud_lambda'):
             features.extend(get_trades_based_amihud_lambda(self.log_ret, self.dollar_size))
-
-        if self.selected_features is None or 'hasbrouck_lambda' in self.selected_features:
+        if self._is_selected('hasbrouck_lambda'):
             features.extend(get_trades_based_hasbrouck_lambda(self.log_ret, self.dollar_size, self.tick_rule))
 
-        # Entropy features
-        if self.selected_features is None or 'entropy' in self.selected_features:
-            encoded_tick_rule_message = encode_tick_rule_array(self.tick_rule)
+        # Entropy Features
+        encoded_tick_rule_message = encode_tick_rule_array(self.tick_rule)
+
+        # Tick rule entropies
+        if self._entropy_selected('tick_rule_shannon_entropy'):
             features.append(get_shannon_entropy(encoded_tick_rule_message))
+        if self._entropy_selected('tick_rule_plug_in_entropy'):
             features.append(get_plug_in_entropy(encoded_tick_rule_message))
+        if self._entropy_selected('tick_rule_lempel_ziv_entropy'):
             features.append(get_lempel_ziv_entropy(encoded_tick_rule_message))
+        if self._entropy_selected('tick_rule_konto_entropy'):
             features.append(get_konto_entropy(encoded_tick_rule_message))
 
-            if self.volume_encoding is not None:
-                message = encode_array(self.trade_size, self.volume_encoding)
-                features.append(get_shannon_entropy(message))
-                features.append(get_plug_in_entropy(message))
-                features.append(get_lempel_ziv_entropy(message))
-                features.append(get_konto_entropy(message))
+        # Volume entropies
+        if self.volume_encoding is not None:
+            volume_message = encode_array(self.trade_size, self.volume_encoding)
+            if self._entropy_selected('volume_shannon_entropy'):
+                features.append(get_shannon_entropy(volume_message))
+            if self._entropy_selected('volume_plug_in_entropy'):
+                features.append(get_plug_in_entropy(volume_message))
+            if self._entropy_selected('volume_lempel_ziv_entropy'):
+                features.append(get_lempel_ziv_entropy(volume_message))
+            if self._entropy_selected('volume_konto_entropy'):
+                features.append(get_konto_entropy(volume_message))
 
-            if self.pct_encoding is not None:
-                message = encode_array(self.log_ret, self.pct_encoding)
-                features.append(get_shannon_entropy(message))
-                features.append(get_plug_in_entropy(message))
-                features.append(get_lempel_ziv_entropy(message))
-                features.append(get_konto_entropy(message))
+        # Pct entropies
+        if self.pct_encoding is not None:
+            pct_message = encode_array(self.log_ret, self.pct_encoding)
+            if self._entropy_selected('pct_shannon_entropy'):
+                features.append(get_shannon_entropy(pct_message))
+            if self._entropy_selected('pct_plug_in_entropy'):
+                features.append(get_plug_in_entropy(pct_message))
+            if self._entropy_selected('pct_lempel_ziv_entropy'):
+                features.append(get_lempel_ziv_entropy(pct_message))
+            if self._entropy_selected('pct_konto_entropy'):
+                features.append(get_konto_entropy(pct_message))
 
         # Compute additional custom features
         custom_features = self._compute_additional_features()
@@ -336,12 +316,7 @@ class MicrostructuralFeaturesGeneratorEnhanced:
 
         list_bars.append(features)
 
-    def _compute_additional_features(self) -> list:
-        """
-        Compute custom user-defined features provided as additional_features.
-
-        :return: (list) Computed values for additional features.
-        """
+    def _compute_additional_features(self):
         computed_features = []
         if self.additional_features:
             tick_df = pd.DataFrame({
@@ -356,20 +331,9 @@ class MicrostructuralFeaturesGeneratorEnhanced:
         return computed_features
 
     def _reset_computed_additional_features(self):
-        """
-        Reset computed additional features after each bar is processed.
-        """
         self.computed_additional_features = []
 
-    def _apply_tick_rule(self, price: float) -> int:
-        """
-        Advances in Financial Machine Learning, page 29.
-
-        Applies the tick rule
-
-        :param price: (float) Price at time t
-        :return: (int) The signed tick
-        """
+    def _apply_tick_rule(self, price):
         if self.prev_price is not None:
             tick_diff = price - self.prev_price
         else:
@@ -383,41 +347,14 @@ class MicrostructuralFeaturesGeneratorEnhanced:
 
         return signed_tick
 
-    def _get_price_diff(self, price: float) -> float:
-        """
-        Get price difference between ticks
+    def _get_price_diff(self, price):
+        return price - self.prev_price if self.prev_price is not None else 0
 
-        :param price: (float) Price at time t
-        :return: (float) Price difference
-        """
-        if self.prev_price is not None:
-            price_diff = price - self.prev_price
-        else:
-            price_diff = 0  # First diff is assumed 0
-        return price_diff
-
-    def _get_log_ret(self, price: float) -> float:
-        """
-        Get log return between ticks
-
-        :param price: (float) Price at time t
-        :return: (float) Log return
-        """
-        if self.prev_price is not None:
-            log_ret = np.log(price / self.prev_price)
-        else:
-            log_ret = 0  # First return is assumed 0
-        return log_ret
+    def _get_log_ret(self, price):
+        return np.log(price / self.prev_price) if self.prev_price is not None else 0
 
     @staticmethod
     def _assert_csv(test_batch):
-        """
-        Tests that the csv file read has the format: date_time, price, and volume.
-        If not then the user needs to create such a file. This format is in place to remove any unwanted overhead.
-
-        :param test_batch: (pd.DataFrame) the first row of the dataset.
-        :return: (None)
-        """
         assert test_batch.shape[1] == 3, 'Must have only 3 columns in csv: date_time, price, & volume.'
         assert isinstance(test_batch.iloc[0, 1], float), 'price column in csv not float.'
         assert not isinstance(test_batch.iloc[0, 2], str), 'volume column in csv not int or float.'
