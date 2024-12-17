@@ -48,7 +48,7 @@ from mlfinlab.util.misc import crop_data_frame_in_batches
 
 # pylint: disable=too-many-instance-attributes
 
-class MicrostructuralFeaturesGenerator:
+class MicrostructuralFeaturesGeneratorEnhanced:
     """
     Class which is used to generate inter-bar features when bars are already compressed.
 
