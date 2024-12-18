@@ -162,3 +162,112 @@ def get_tick_bars(file_path_or_df: Union[str, Iterable[str], pd.DataFrame], thre
                         threshold=threshold, batch_size=batch_size)
     tick_bars = bars.batch_run(file_path_or_df=file_path_or_df, verbose=verbose, to_csv=to_csv, output_path=output_path)
     return tick_bars
+
+
+
+class RelativePriceBars(BaseBars):
+    """
+    This class creates bars based on a relative price threshold (percentage).
+    Once the price moves away from the open_price of the current bar
+    by at least `threshold` * open_price (in either direction), a new bar is formed.
+
+    Attributes:
+        threshold: (float) The relative price threshold. For example:
+                   threshold=0.01 means a 1% move from the open_price triggers a new bar.
+    """
+
+    def __init__(self, threshold: float, batch_size: int = 20000000):
+        """
+        Constructor
+
+        :param threshold: (float) Relative price movement threshold that triggers a bar creation.
+                          e.g. 0.01 means 1% move from the open price.
+        :param batch_size: (int) Number of rows to read in from the csv, per batch
+        """
+        super().__init__(metric='rel_price', batch_size=batch_size)
+        self.threshold = threshold
+        self._reset_cache()
+
+    def _reset_cache(self):
+        """
+        Resets the cache for the new bar creation.
+        """
+        self.open_price = None
+        self.high_price, self.low_price = -np.inf, np.inf
+        self.cum_statistics = {
+            'cum_ticks': 0,
+            'cum_dollar_value': 0,
+            'cum_volume': 0,
+            'cum_buy_volume': 0
+        }
+
+    def _extract_bars(self, data: Union[list, tuple, np.ndarray]) -> list:
+        """
+        Iterate over rows and construct relative price threshold bars.
+
+        :param data: (tuple or np.ndarray) Contains 3 columns - date_time, price, and volume.
+        :return: (list) Extracted bars
+        """
+        list_bars = []
+
+        for row in data:
+            date_time = row[0]
+            self.tick_num += 1
+            price = float(row[1])
+            volume = row[2]
+            dollar_value = price * volume
+            signed_tick = self._apply_tick_rule(price)
+
+            # If this is the first tick of a new bar, set the open price.
+            if self.open_price is None:
+                self.open_price = price
+
+            # Update high/low prices
+            self.high_price, self.low_price = self._update_high_low(price)
+
+            # Update cumulative stats
+            self.cum_statistics['cum_ticks'] += 1
+            self.cum_statistics['cum_dollar_value'] += dollar_value
+            self.cum_statistics['cum_volume'] += volume
+            if signed_tick == 1:
+                self.cum_statistics['cum_buy_volume'] += volume
+
+            # Compute the thresholds
+            upper_bound = self.open_price * (1 + self.threshold)
+            lower_bound = self.open_price * (1 - self.threshold)
+
+            # Check if the relative price threshold has been breached
+            if price >= upper_bound or price <= lower_bound:
+                # Create a new bar
+                self._create_bars(date_time, price, self.high_price, self.low_price, list_bars)
+                # Reset the cache for the next bar
+                self._reset_cache()
+
+        return list_bars
+
+
+def get_relative_price_bars(file_path_or_df: Union[str, Iterable[str], pd.DataFrame],
+                            threshold: float,
+                            batch_size: int = 20000000,
+                            verbose: bool = True,
+                            to_csv: bool = False,
+                            output_path: Optional[str] = None) -> pd.DataFrame:
+    """
+    Creates bars based on relative price moves: 
+    date_time, open, high, low, close, volume, cum_buy_volume, cum_ticks, cum_dollar_value.
+
+    For example, if threshold=0.01, this means that once the price moves 1% above or below
+    the bar's open price, a new bar is formed.
+
+    :param file_path_or_df: (str, iterable of str, or pd.DataFrame) Path(s) to the csv file(s) or DataFrame 
+                            containing raw tick data in the format [date_time, price, volume]
+    :param threshold: (float) The relative price movement threshold. e.g. 0.01 = 1%
+    :param batch_size: (int) Number of rows per batch.
+    :param verbose: (bool) Print out batch information.
+    :param to_csv: (bool) Save bars to csv after every batch run.
+    :param output_path: (str) Path to csv file, if to_csv is True.
+    :return: (pd.DataFrame) Dataframe of relative price threshold bars.
+    """
+    bars = RelativePriceBars(threshold=threshold, batch_size=batch_size)
+    relative_price_bars = bars.batch_run(file_path_or_df=file_path_or_df, verbose=verbose, to_csv=to_csv, output_path=output_path)
+    return relative_price_bars
