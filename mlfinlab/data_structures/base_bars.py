@@ -241,6 +241,18 @@ class BaseBars(ABC):
 
         self.prev_price = price
         return signed_tick
+        
+    def _get_price_diff(self, price):
+        """
+        Compute price difference.
+        """
+        return price - self.prev_price if self.prev_price is not None else 0
+
+    def _get_log_ret(self, price):
+        """
+        Compute log return.
+        """
+        return np.log(price / self.prev_price) if self.prev_price is not None else 0
 
     def _get_imbalance(self, price: float, signed_tick: int, volume: float) -> float:
         """
@@ -259,21 +271,26 @@ class BaseBars(ABC):
     # ---------------------------
     # Additional Features Methods
     # ---------------------------
-    def _update_ticks_in_bar(self, row: np.ndarray) -> None:
+    def _update_ticks_in_bar(self, row):
         """
-        Maintain the list of ticks forming the current bar
-        :param row: (ndarray) A single tick with [date_time, price, volume]
+        Update the ticks in the current bar, computing additional columns for tick_df.
+
+        :param row: (array-like) A single tick with [date_time, price, volume].
         """
-        if self.additional_features:
-            # Convert row to a dict or a Series with named fields for convenience
-            # Let's assume the input row is structured as [date_time, price, volume]
-            # Convert to dict for easier handling
-            tick_data = {
-                'date_time': row[0],
-                'price': row[1],
-                'volume': row[2]
-            }
-            self.ticks_in_current_bar.append(tick_data)
+        date_time, price, volume = row
+        price_diff = self._get_price_diff(price)
+        log_ret = self._get_log_ret(price)
+        tick_sign = self._apply_tick_rule(price)
+
+        # Add the tick data along with computed columns to the list
+        self.ticks_in_current_bar.append({
+            'date_time': date_time,
+            'price': price,
+            'volume': volume,
+            'price_diff': price_diff,
+            'log_ret': log_ret,
+            'tick_sign': tick_sign
+        })
 
     def _reset_ticks_in_bar(self):
         """
