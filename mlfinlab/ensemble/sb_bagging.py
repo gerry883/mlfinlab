@@ -72,7 +72,7 @@ def _parallel_build_estimators(n_estimators, ensemble, X, y, ind_mat, sample_wei
     max_features = ensemble._max_features
     max_samples = ensemble._max_samples
     bootstrap_features = ensemble.bootstrap_features
-    support_sample_weight = has_fit_parameter(ensemble.base_estimator_,
+    support_sample_weight = has_fit_parameter(ensemble.estimator_,
                                               "sample_weight")
 
     if not support_sample_weight and sample_weight is not None:
@@ -131,7 +131,7 @@ class SequentiallyBootstrappedBaseBagging(BaseBagging, metaclass=ABCMeta):
     def __init__(self,
                  samples_info_sets,
                  price_bars,
-                 base_estimator=None,
+                 estimator=None,
                  n_estimators=10,
                  max_samples=1.0,
                  max_features=1.0,
@@ -142,7 +142,7 @@ class SequentiallyBootstrappedBaseBagging(BaseBagging, metaclass=ABCMeta):
                  random_state=None,
                  verbose=0):
         super().__init__(
-            base_estimator=base_estimator,
+            estimator=estimator,
             n_estimators=n_estimators,
             bootstrap=True,
             max_samples=max_samples,
@@ -245,7 +245,7 @@ class SequentiallyBootstrappedBaseBagging(BaseBagging, metaclass=ABCMeta):
         # Validate max_features
         if isinstance(self.max_features, (numbers.Integral, np.integer)):
             max_features = self.max_features
-        elif isinstance(self.max_features, np.float):
+        elif isinstance(self.max_features, float):
             max_features = self.max_features * self.n_features_
         else:
             raise ValueError("max_features must be int or float")
@@ -395,7 +395,7 @@ class SequentiallyBootstrappedBaggingClassifier(SequentiallyBootstrappedBaseBagg
     def __init__(self,
                  samples_info_sets,
                  price_bars,
-                 base_estimator=None,
+                 estimator=None,
                  n_estimators=10,
                  max_samples=1.0,
                  max_features=1.0,
@@ -408,7 +408,7 @@ class SequentiallyBootstrappedBaggingClassifier(SequentiallyBootstrappedBaseBagg
         super().__init__(
             samples_info_sets=samples_info_sets,
             price_bars=price_bars,
-            base_estimator=base_estimator,
+            estimator=estimator,
             n_estimators=n_estimators,
             max_samples=max_samples,
             max_features=max_features,
@@ -529,7 +529,7 @@ class SequentiallyBootstrappedBaggingRegressor(SequentiallyBootstrappedBaseBaggi
     def __init__(self,
                  samples_info_sets,
                  price_bars,
-                 base_estimator=None,
+                 estimator=None,
                  n_estimators=10,
                  max_samples=1.0,
                  max_features=1.0,
@@ -542,7 +542,7 @@ class SequentiallyBootstrappedBaggingRegressor(SequentiallyBootstrappedBaseBaggi
         super().__init__(
             samples_info_sets=samples_info_sets,
             price_bars=price_bars,
-            base_estimator=base_estimator,
+            estimator=estimator,
             n_estimators=n_estimators,
             max_samples=max_samples,
             max_features=max_features,
