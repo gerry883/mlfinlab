@@ -126,7 +126,7 @@ class RelativePriceBars(BaseBars):
     Creates bars whenever price moves a certain percentage (threshold) away from the open_price of the current bar.
     """
 
-    def __init__(self, threshold: float, batch_size: int = 20000000, additional_features=None):
+    def __init__(self, threshold: float, batch_size: int = 20000000, additional_features=None, renko=False):
         """
         Constructor
 
@@ -136,6 +136,7 @@ class RelativePriceBars(BaseBars):
         """
         super().__init__(metric='rel_price', batch_size=batch_size, additional_features=additional_features)
         self.threshold = threshold
+        self.renko = renko
         self._reset_cache()
 
     def _reset_cache(self):
@@ -171,6 +172,19 @@ class RelativePriceBars(BaseBars):
             # Set open price if not set
             if self.open_price is None:
                 self.open_price = price
+                upper_bound = self.open_price * (1 + self.threshold)
+                lower_bound = self.open_price * (1 - self.threshold)
+                
+                if self.renko and list_bars:
+                    
+                    last_bar_sign = np.sign(list_bars[-1][5] - list_bars[-1][2])
+
+                    if last_bar_sign == 1:
+                        upper_bound = self.open_price * (1 + self.threshold)
+                        lower_bound = self.open_price * (1 - 2*self.threshold)
+                    else:
+                        upper_bound = self.open_price * (1 + 2*self.threshold)
+                        lower_bound = self.open_price * (1 - self.threshold)
 
             # Update high/low
             self.high_price, self.low_price = self._update_high_low(price)
@@ -181,10 +195,6 @@ class RelativePriceBars(BaseBars):
             self.cum_statistics['cum_volume'] += volume
             if signed_tick == 1:
                 self.cum_statistics['cum_buy_volume'] += volume
-
-            # Compute threshold bounds
-            upper_bound = self.open_price * (1 + self.threshold)
-            lower_bound = self.open_price * (1 - self.threshold)
 
             # Check if price moved beyond threshold
             if price >= upper_bound or price <= lower_bound:
@@ -210,10 +220,11 @@ def get_relative_price_bars(file_path_or_df: Union[str, Iterable[str], pd.DataFr
                             verbose: bool = True,
                             to_csv: bool = False,
                             output_path: Optional[str] = None,
-                            additional_features=None) -> pd.DataFrame:
+                            additional_features=None,
+                            renko: bool = False) -> pd.DataFrame:
     """
     Creates relative price bars with optional additional features.
     """
-    bars = RelativePriceBars(threshold=threshold, batch_size=batch_size, additional_features=additional_features)
+    bars = RelativePriceBars(threshold=threshold, batch_size=batch_size, additional_features=additional_features, renko=renko)
     relative_price_bars = bars.batch_run(file_path_or_df=file_path_or_df, verbose=verbose, to_csv=to_csv, output_path=output_path)
     return relative_price_bars
