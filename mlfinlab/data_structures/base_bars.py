@@ -56,84 +56,192 @@ class BaseBars(ABC):
         self.ticks_in_current_bar = []
         self.computed_additional_features = []
 
-    def batch_run(self, file_path_or_df: Union[str, Iterable[str], pd.DataFrame], verbose: bool = True,
-                  to_csv: bool = False, output_path: Optional[str] = None) -> Union[pd.DataFrame, None]:
+    # def batch_run(self, file_path_or_df: Union[str, Iterable[str], pd.DataFrame], verbose: bool = True,
+    #               to_csv: bool = False, output_path: Optional[str] = None) -> Union[pd.DataFrame, None]:
+    #     """
+    #     Reads csv file(s) or pd.DataFrame in batches and then constructs the financial data structure in a DataFrame.
+    #     The input must have only 3 columns: date_time, price, & volume.
+
+    #     :param file_path_or_df: (str, iterable of str, or pd.DataFrame) The input data source.
+    #     :param verbose: (bool) Flag whether to print messages on each processed batch.
+    #     :param to_csv: (bool) Flag for writing results to a CSV file or returning an in-memory DataFrame.
+    #     :param output_path: (str) Path to results file, if to_csv = True.
+
+    #     :return: (pd.DataFrame or None) Financial data structure
+    #     """
+    #     if to_csv is True:
+    #         header = True
+    #         open(output_path, 'w').close()  # clean output csv file
+
+    #     if verbose:  # pragma: no cover
+    #         print('Reading data in batches:')
+
+    #     # Determine the output columns:
+    #     # Base columns + additional feature names
+    #     cols = ['date_time', 'tick_num', 'open', 'high', 'low', 'close', 'volume', 'cum_buy_volume',
+    #             'cum_ticks', 'cum_dollar_value']
+    #     feature_cols = [feature.name for feature in self.additional_features]
+    #     cols.extend(feature_cols)
+
+    #     # Read csv in batches
+    #     count = 0
+    #     final_bars = []
+    #     for batch in self._batch_iterator(file_path_or_df):
+    #         if verbose:  # pragma: no cover
+    #             print('Batch number:', count)
+
+    #         list_bars = self.run(data=batch)
+
+    #         if to_csv is True:
+    #             pd.DataFrame(list_bars, columns=cols).to_csv(output_path, header=header, index=False, mode='a')
+    #             header = False
+    #         else:
+    #             # Append to bars list
+    #             final_bars += list_bars
+    #         count += 1
+
+    #     if verbose:  # pragma: no cover
+    #         print('Returning bars \n')
+
+    #     # Return a DataFrame
+    #     if final_bars:
+    #         bars_df = pd.DataFrame(final_bars, columns=cols)
+    #         return bars_df
+
+    #     return None
+
+    # def _batch_iterator(self, file_path_or_df: Union[str, Iterable[str], pd.DataFrame]) -> Generator[pd.DataFrame, None, None]:
+    #     """
+    #     Generator that yields batches of data frames.
+    #     """
+    #     if isinstance(file_path_or_df, (list, tuple)):
+    #         # Assert format of all files
+    #         for file_path in file_path_or_df:
+    #             self._read_first_row(file_path)
+    #         for file_path in file_path_or_df:
+    #             for batch in pd.read_csv(file_path, chunksize=self.batch_size, parse_dates=[0]):
+    #                 yield batch
+
+    #     elif isinstance(file_path_or_df, str):
+    #         self._read_first_row(file_path_or_df)
+    #         for batch in pd.read_csv(file_path_or_df, chunksize=self.batch_size, parse_dates=[0]):
+    #             yield batch
+
+    #     elif isinstance(file_path_or_df, pd.DataFrame):
+    #         for batch in _crop_data_frame_in_batches(file_path_or_df, self.batch_size):
+    #             yield batch
+
+    #     else:
+    #         raise ValueError('file_path_or_df is neither string(path to a csv file), '
+    #                          'iterable of strings, nor pd.DataFrame')
+
+    def batch_run(self, file_path_or_df: Union[
+            str,
+            Iterable[Union[str, pd.DataFrame]],
+            pd.DataFrame],
+            verbose: bool = True, to_csv: bool = False,
+            output_path: Optional[str] = None) -> Union[pd.DataFrame, None]:
         """
-        Reads csv file(s) or pd.DataFrame in batches and then constructs the financial data structure in a DataFrame.
+        Reads CSV file(s), DataFrame(s), or an iterator of DataFrames/file paths in batches and then constructs the financial data structure.
         The input must have only 3 columns: date_time, price, & volume.
 
-        :param file_path_or_df: (str, iterable of str, or pd.DataFrame) The input data source.
+        :param file_path_or_df: (str, iterable of str or DataFrame, or pd.DataFrame) The input data source.
         :param verbose: (bool) Flag whether to print messages on each processed batch.
         :param to_csv: (bool) Flag for writing results to a CSV file or returning an in-memory DataFrame.
         :param output_path: (str) Path to results file, if to_csv = True.
-
         :return: (pd.DataFrame or None) Financial data structure
         """
-        if to_csv is True:
+        if to_csv:
             header = True
-            open(output_path, 'w').close()  # clean output csv file
+            open(output_path, 'w').close()  # Clear output CSV file
 
         if verbose:  # pragma: no cover
             print('Reading data in batches:')
 
         # Determine the output columns:
         # Base columns + additional feature names
-        cols = ['date_time', 'tick_num', 'open', 'high', 'low', 'close', 'volume', 'cum_buy_volume',
-                'cum_ticks', 'cum_dollar_value']
+        cols = ['date_time', 'tick_num', 'open', 'high', 'low', 'close', 'volume',
+                'cum_buy_volume', 'cum_ticks', 'cum_dollar_value']
         feature_cols = [feature.name for feature in self.additional_features]
         cols.extend(feature_cols)
 
-        # Read csv in batches
         count = 0
         final_bars = []
         for batch in self._batch_iterator(file_path_or_df):
             if verbose:  # pragma: no cover
-                print('Batch number:', count)
+                print('Processing batch number:', count)
 
             list_bars = self.run(data=batch)
 
-            if to_csv is True:
-                pd.DataFrame(list_bars, columns=cols).to_csv(output_path, header=header, index=False, mode='a')
+            if to_csv:
+                pd.DataFrame(list_bars, columns=cols).to_csv(
+                    output_path, header=header, index=False, mode='a'
+                )
                 header = False
             else:
-                # Append to bars list
                 final_bars += list_bars
             count += 1
 
         if verbose:  # pragma: no cover
-            print('Returning bars \n')
+            print('Returning bars\n')
 
-        # Return a DataFrame
         if final_bars:
-            bars_df = pd.DataFrame(final_bars, columns=cols)
-            return bars_df
-
+            return pd.DataFrame(final_bars, columns=cols)
         return None
 
-    def _batch_iterator(self, file_path_or_df: Union[str, Iterable[str], pd.DataFrame]) -> Generator[pd.DataFrame, None, None]:
+    def _batch_iterator(self, file_path_or_df: Union[
+            str,
+            Iterable[Union[str, pd.DataFrame]],
+            pd.DataFrame]) -> Generator[pd.DataFrame, None, None]:
         """
-        Generator that yields batches of data frames.
+        Generator that yields batches of DataFrames.
+        Supports:
+         - A single CSV file path (str)
+         - An iterable (e.g., list, tuple, or generator) of CSV file paths or DataFrames
+         - A single DataFrame
         """
+        # Handle list or tuple explicitly
         if isinstance(file_path_or_df, (list, tuple)):
-            # Assert format of all files
-            for file_path in file_path_or_df:
-                self._read_first_row(file_path)
-            for file_path in file_path_or_df:
-                for batch in pd.read_csv(file_path, chunksize=self.batch_size, parse_dates=[0]):
-                    yield batch
+            if all(isinstance(x, pd.DataFrame) for x in file_path_or_df):
+                for df in file_path_or_df:
+                    for batch in _crop_data_frame_in_batches(df, self.batch_size):
+                        yield batch
+            elif all(isinstance(x, str) for x in file_path_or_df):
+                for file_path in file_path_or_df:
+                    self._read_first_row(file_path)
+                for file_path in file_path_or_df:
+                    for batch in pd.read_csv(file_path, chunksize=self.batch_size, parse_dates=[0]):
+                        yield batch
+            else:
+                raise ValueError("List or tuple items must all be either DataFrames or strings representing file paths.")
 
+        # Handle a single CSV file path
         elif isinstance(file_path_or_df, str):
             self._read_first_row(file_path_or_df)
             for batch in pd.read_csv(file_path_or_df, chunksize=self.batch_size, parse_dates=[0]):
                 yield batch
 
+        # Handle a single DataFrame
         elif isinstance(file_path_or_df, pd.DataFrame):
             for batch in _crop_data_frame_in_batches(file_path_or_df, self.batch_size):
                 yield batch
 
+        # Handle any other iterable (e.g., a generator)
+        elif isinstance(file_path_or_df, Iterable):
+            for element in file_path_or_df:
+                if isinstance(element, pd.DataFrame):
+                    for batch in _crop_data_frame_in_batches(element, self.batch_size):
+                        yield batch
+                elif isinstance(element, str):
+                    self._read_first_row(element)
+                    for batch in pd.read_csv(element, chunksize=self.batch_size, parse_dates=[0]):
+                        yield batch
+                else:
+                    raise ValueError("Elements in the iterable must be either pd.DataFrame or str.")
         else:
-            raise ValueError('file_path_or_df is neither string(path to a csv file), '
-                             'iterable of strings, nor pd.DataFrame')
+            raise ValueError(
+                'file_path_or_df must be either a string (path to a CSV file), an iterable of strings/DataFrames, or a pd.DataFrame.'
+            )
 
     def _read_first_row(self, file_path: str):
         """
