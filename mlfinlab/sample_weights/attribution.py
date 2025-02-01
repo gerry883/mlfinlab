@@ -65,7 +65,7 @@ def get_weights_by_return(triple_barrier_events, close_series, num_threads=5, ve
     return weights
 
 
-def get_weights_by_time_decay(triple_barrier_events, close_series, num_threads=5, decay=1, verbose=True):
+def get_weights_by_time_decay(triple_barrier_events, close_series, num_threads=5, decay=1, verbose=True, return_uniq_too=False):
     """
     Advances in Financial Machine Learning, Snippet 4.11, page 70.
 
@@ -96,4 +96,8 @@ def get_weights_by_time_decay(triple_barrier_events, close_series, num_threads=5
     const = 1 - slope * decay_w.iloc[-1]
     decay_w = const + slope * decay_w
     decay_w[decay_w < 0] = 0  # Weights can't be negative
+
+    if return_uniq_too:
+        return decay_w, av_uniqueness
+    
     return decay_w
