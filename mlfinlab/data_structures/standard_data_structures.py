@@ -172,19 +172,19 @@ class RelativePriceBars(BaseBars):
             # Set open price if not set
             if self.open_price is None:
                 self.open_price = price
-                upper_bound = self.open_price * (1 + self.threshold)
-                lower_bound = self.open_price * (1 - self.threshold)
+                self.upper_bound = self.open_price * (1 + self.threshold)
+                self.lower_bound = self.open_price * (1 - self.threshold)
                 
                 if self.renko and list_bars:
                     
                     last_bar_sign = np.sign(list_bars[-1][5] - list_bars[-1][2])
 
                     if last_bar_sign == 1:
-                        upper_bound = self.open_price * (1 + self.threshold)
-                        lower_bound = self.open_price * (1 - 2*self.threshold)
+                        self.upper_bound = self.open_price * (1 + self.threshold)
+                        self.lower_bound = self.open_price * (1 - 2*self.threshold)
                     else:
-                        upper_bound = self.open_price * (1 + 2*self.threshold)
-                        lower_bound = self.open_price * (1 - self.threshold)
+                        self.upper_bound = self.open_price * (1 + 2*self.threshold)
+                        self.lower_bound = self.open_price * (1 - self.threshold)
 
             # Update high/low
             self.high_price, self.low_price = self._update_high_low(price)
@@ -197,7 +197,7 @@ class RelativePriceBars(BaseBars):
                 self.cum_statistics['cum_buy_volume'] += volume
 
             # Check if price moved beyond threshold
-            if price >= upper_bound or price <= lower_bound:
+            if price >= self.upper_bound or price <= self.lower_bound:
                 # Compute additional features before creating the bar
                 self._compute_additional_features()
 
