@@ -379,26 +379,37 @@ class BaseBars(ABC):
     # ---------------------------
     # Additional Features Methods
     # ---------------------------
-    def _update_ticks_in_bar(self, row):
-        """
-        Update the ticks in the current bar, computing additional columns for tick_df.
+def _update_ticks_in_bar(self, row):
+    """
+    Update the ticks in the current bar, computing additional columns for tick_df.
+    Accepts rows with [date_time, price, volume, ...] (optionally is_buyer_maker)
+    """
+    # Support both 3 and 4+ columns
+    date_time, price, volume = row[:3]
+    is_buyer_maker = None
 
-        :param row: (array-like) A single tick with [date_time, price, volume].
-        """
-        date_time, price, volume = row
-        price_diff = self._get_price_diff(price)
-        log_ret = self._get_log_ret(price)
-        tick_sign = self._apply_tick_rule(price)
+    # Check if 4th column exists → Binance-style data
+    if len(row) > 3:
+        is_buyer_maker = bool(row[3])
 
-        # Add the tick data along with computed columns to the list
-        self.ticks_in_current_bar.append({
-            'date_time': date_time,
-            'price': price,
-            'volume': volume,
-            'price_diff': price_diff,
-            'log_ret': log_ret,
-            'tick_sign': tick_sign
-        })
+    price_diff = self._get_price_diff(price)
+    log_ret = self._get_log_ret(price)
+
+    # Use true trade direction if available
+    if is_buyer_maker is not None:
+        tick_sign = -1 if is_buyer_maker else +1
+    else:
+        tick_sign = self._apply_tick_rule(price)  # fallback
+
+    # Append tick data
+    self.ticks_in_current_bar.append({
+        'date_time': date_time,
+        'price': price,
+        'volume': volume,
+        'price_diff': price_diff,
+        'log_ret': log_ret,
+        'tick_sign': tick_sign
+    })
 
     def _reset_ticks_in_bar(self):
         """
